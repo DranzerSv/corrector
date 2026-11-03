@@ -306,7 +306,7 @@ section{margin-bottom:var(--s-8)}
 
   <div class="hero">
     <span class="eyebrow">Herramienta interna · <span class="pais">El Salvador</span></span>
-    <h1>Corrector de Markdown</h1>
+    <h1>Corrector de Markdown 0.1.6</h1>
     <p class="lead">Pega el texto de la promoción y se corrige solo: los titulares con dos puntos quedan en negrita y los asteriscos mal cerrados se arreglan. Si al pegar desde Excel aparecen comillas al inicio y al final de cada condición, también se quitan.</p>
     <span class="meta">Todo se procesa en tu navegador. El texto no se envía a ningún lado.</span>
   </div>
@@ -316,6 +316,7 @@ section{margin-bottom:var(--s-8)}
     <label class="opt"><input type="checkbox" id="o-labels" checked> Titulares en negrita</label>
     <label class="opt"><input type="checkbox" id="o-inline" checked> Arreglar asteriscos</label>
     <label class="opt"><input type="checkbox" id="o-disc" checked> Descuentos sin negrita</label>
+    <label class="opt"><input type="checkbox" id="o-pipes" checked> Espacio antes y después de |</label>
     <label class="opt"><input type="checkbox" id="o-blank" checked> Quitar líneas vacías repetidas</label>
     <label class="opt"><input type="checkbox" id="o-trim" checked> Quitar espacios al final</label>
     <label class="opt"><input type="checkbox" id="o-expired" checked> Quitar condiciones vencidas</label>
@@ -390,6 +391,7 @@ section{margin-bottom:var(--s-8)}
       <div class="kpi"><small>Líneas vacías quitadas</small><b id="k-blank">0</b></div>
       <div class="kpi"><small>Comillas quitadas</small><b id="k-quotes">0</b></div>
       <div class="kpi"><small>Descuentos sin negrita</small><b id="k-disc">0</b></div>
+      <div class="kpi"><small>Barras | con espacio</small><b id="k-pipes">0</b></div>
       <div class="kpi"><small>Condiciones vencidas quitadas</small><b id="k-exp">0</b></div>
     </div>
     <div class="card exp" id="exp-card" hidden>
@@ -405,9 +407,10 @@ section{margin-bottom:var(--s-8)}
     <details class="note">
       <summary>¿Cómo decide qué es un titular?</summary>
       <p>Una línea cuenta como titular cuando empieza con un texto de hasta 6 palabras seguido de dos puntos, por ejemplo Vigencia: o Condiciones:. Ese texto, con sus dos puntos, queda como **Vigencia:**. No se toman en cuenta enlaces (https:), horas (10:30), encabezados con #, tablas ni bloques de código. Si una frase larga lleva dos puntos, no se toca.</p>
-      <p>Las comillas que quedan solas al inicio o al final de una línea (sin su pareja en esa misma línea) se quitan, porque las agrega Excel al copiar cada celda. Las comillas que abren y cierran dentro de la misma línea, como “solo hoy”, se respetan.</p>
+      <p>Las comillas que quedan solas al inicio o al final de una línea (sin su pareja en esa misma línea) se quitan, porque las agrega Excel al copiar cada celda. Las comillas duplicadas ("") se dejan en una sola. Las comillas que abren y cierran dentro de la misma línea, como "ejemplo" o “solo hoy”, se respetan.</p>
       <p>Los descuentos van sin negrita: si un tramo en negrita tiene un porcentaje (**35% de descuento**), se le quita la negrita. Los titulares que terminan en dos puntos se mantienen en negrita.</p>
       <p>Una condición se quita de la versión final cuando la fecha más lejana que trae ya pasó. Cada encabezado (###) empieza una condición nueva; el texto antes del primer encabezado cuenta como una condición. Si no trae fecha, se queda.</p>
+      <p>Las barras | quedan con un espacio antes y otro después (Online|Tiendas → Online | Tiendas). Si la barra está al inicio o al final de la línea, solo se agrega el espacio hacia el texto. Las barras escapadas (\|) y los bloques de código no se tocan.</p>
       <p>Un asterisco suelto, sin pareja (*30% de descuento), se toma como error y se quita. Un par de asteriscos sencillos (*texto*) se respeta porque es cursiva. A los encabezados sin espacio (###Título) se les agrega el espacio para que se vean como encabezado.</p>
     </details>
   </section>
@@ -418,7 +421,7 @@ section{margin-bottom:var(--s-8)}
   const $ = id => document.getElementById(id);
   const input = $('in'), output = $('out'), preview = $('preview');
   const opt = {
-    gap: $('o-gap'), saved: $('o-saved'), expired: $('o-expired'), quotes: $('o-quotes'), labels: $('o-labels'), disc: $('o-disc'), inline: $('o-inline'), blank: $('o-blank'),
+    gap: $('o-gap'), saved: $('o-saved'), expired: $('o-expired'), quotes: $('o-quotes'), labels: $('o-labels'), disc: $('o-disc'), pipes: $('o-pipes'), inline: $('o-inline'), blank: $('o-blank'),
     trim: $('o-trim'), br: $('o-br')
   };
   const MAX_WORDS = 6, MAX_CHARS = 50;
@@ -472,10 +475,17 @@ section{margin-bottom:var(--s-8)}
       return l;
     });
     let out = lines.join('\n');
-    if(n){
-      const c = (out.match(/""/g) || []).length;
-      out = out.replace(/""/g, '"'); n += c;
-    }
+    // Comillas duplicadas por dentro ("") -> una sola ("ejemplo" sigue funcionando)
+    const c = (out.match(/""/g) || []).length;
+    out = out.replace(/""/g, '"'); n += c;
+    // Segunda pasada: comillas sobrantes al inicio o al final de cada línea (sin pareja)
+    out = out.split('\n').map(l => {
+      if(/^\s*["“”]+\s*$/.test(l)){ n += l.trim().length; return ''; }
+      let m;
+      while((m = l.match(/^(\s*)["“”]/)) && odd(l)){ l = m[1] + l.slice(m[0].length); n++; }
+      while((m = l.match(/["“”](\s*)$/)) && odd(l)){ l = l.slice(0, l.length - m[0].length) + m[1]; n++; }
+      return l;
+    }).join('\n');
     return { text: out, n };
   }
 
@@ -551,6 +561,15 @@ section{margin-bottom:var(--s-8)}
       (DISCOUNT_RE.test(t) && !/:\s*$/.test(t)) ? t.trim() : m);
   }
 
+  // Barra vertical con un espacio antes y después: "Online|Tiendas" -> "Online | Tiendas".
+  // Al inicio o al final de la línea solo se deja el espacio hacia el texto. "\|" se respeta.
+  function spacePipes(line){
+    return line.replace(/[ \t]*(?<!\\)\|[ \t]*/g, (m, off, s) => {
+      const atStart = !s.slice(0, off).trim(), atEnd = !s.slice(off + m.length).trim();
+      return (atStart ? m.match(/^[ \t]*/)[0] : ' ') + '|' + (atEnd ? '' : ' ');
+    });
+  }
+
   function isSkippable(line){
     return /^\s*(\||>|```|~~~)/.test(line) || /^\s*([-*_])(\s*\1){2,}\s*$/.test(line);
   }
@@ -561,14 +580,21 @@ section{margin-bottom:var(--s-8)}
     if(opt.quotes.checked){ const q = stripQuotes(text); text = q.text; nQuotes = q.n; }
     const lines = text.split('\n');
     const changes = [];
-    let nLabels = 0, nInline = 0, nDisc = 0, inCode = false;
+    let nLabels = 0, nInline = 0, nDisc = 0, nPipes = 0, inCode = false;
 
     const fixed = lines.map((line, i) => {
       const before = line;
       if(/^\s*(```|~~~)/.test(line)){ inCode = !inCode; return line; }
       if(inCode) return line;
       if(opt.trim.checked) line = line.replace(/[ \t]+$/, '');
-      if(!line.trim() || isSkippable(line)) return line;
+      if(opt.pipes.checked && line.includes('|')){
+        const lp = spacePipes(line);
+        if(lp !== line){ nPipes++; line = lp; }
+      }
+      if(!line.trim() || isSkippable(line)){
+        if(line.trim() !== before.trim()) changes.push({ n: i + 1, before, after: line });
+        return line;
+      }
 
       line = fixHeading(line);
       let [prefix, body] = splitPrefix(line);
@@ -606,7 +632,7 @@ section{margin-bottom:var(--s-8)}
       out = out.map((l, i) => (l.trim() && out[i + 1] && out[i + 1].trim() && !/ {2}$/.test(l)) ? l + '  ' : l);
     }
 
-    return { text: out.join('\n'), changes, nLabels, nInline, nBlank, nQuotes, nDisc };
+    return { text: out.join('\n'), changes, nLabels, nInline, nBlank, nQuotes, nDisc, nPipes };
   }
 
   // Vista previa sencilla de Markdown
@@ -649,6 +675,7 @@ section{margin-bottom:var(--s-8)}
     $('k-blank').textContent = r.nBlank;
     $('k-quotes').textContent = r.nQuotes;
     $('k-disc').textContent = r.nDisc;
+    $('k-pipes').textContent = r.nPipes;
     const tb = $('changes');
     if(!r.changes.length){
       tb.innerHTML = '<tr><td colspan="3" class="empty">' +
